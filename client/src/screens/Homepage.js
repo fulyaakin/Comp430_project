@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Histogram from "../components/Histogram";
 import StatsCard from "../components/StatsCard";
+import SimpleTable from "../components/SimpleTable";
 import NavigationBar from "../components/NavigationBar";
 import axios from "axios";
 
@@ -10,6 +11,8 @@ function Homepage() {
   const [histogram2, setHistogram2] = useState()
   const [value1, setValue1] = useState()
   const [value2, setValue2] = useState()
+  const [table1, setTable1] = useState()
+  const [table2, setTable2] = useState()
 
   useEffect(()=>{
     if(localStorage.getItem('username') === 'Analyst1'){
@@ -17,6 +20,7 @@ function Homepage() {
         'http://localhost:8000/value_1').then(response => {
           setValue1(response.data.content);
           setHistogram1(response.data.content2);
+          setTable1(response.data.content3);
       }).catch(error => {
         console.log(error)
       });
@@ -27,6 +31,7 @@ function Homepage() {
         'http://localhost:8000/value_2').then(response => {
           setValue2(response.data.content);
           setHistogram2(response.data.content2);
+          setTable2(response.data.content3);
       }).catch(error => {
         console.log(error)
       });
@@ -36,13 +41,17 @@ function Homepage() {
 
     let card_title='Address with Most Orders';
     let card_number = value2;
-    let hist_data = histogram2;
     let hist_title= 'Order Distribution through Neighborhoods';
+    let hist_data = histogram2;
+    let table_title = "Orders from Neighborhood with Most Orders";
+    let table_data = table2;
 
     if(localStorage.getItem("username") === 'Analyst1'){
       card_title = 'Gender with Most Orders';
       card_number = value1;
       hist_data = histogram1;
+      table_data = table1;
+      table_title = "Orders of People Aged 21";
       hist_title='Order Distribution through Ages';
     }
 
@@ -74,8 +83,9 @@ function Homepage() {
                 </span>
                 <button onClick={handleHistogram} style={{"width":"20vw","height":"10vh","borderRadius":"10px","fontSize":"1.8vw","marginBottom":"3vw"}} type="submit"><strong>Histogram</strong></button>
                 <br/>
-                {isHistogram? <Histogram data={hist_data} title={hist_title}/> : null}
+                {isTable? <SimpleTable data={table_data} title={table_title}/> : null}
                 <span style={{"display":"flex","justifyContent":"center"}}>{isCard? <StatsCard title={card_title} number={card_number}/> : null}</span>
+                {isHistogram? <Histogram data={hist_data} title={hist_title}/> : null}
             </div>
         </div>
       </div>

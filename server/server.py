@@ -10,6 +10,9 @@ import csv
 import numpy as np
 import math
 import random
+import os
+from anytree import Node, RenderTree
+from pandas import DataFrame, read_csv
 
 db_connection = mysql.connector.connect(
   host="localhost",
@@ -110,6 +113,102 @@ def apply_exponential_mechanism(my_dict, dataset, epsilon):
         return keys_list[indv_prob.index(max(indv_prob))] 
     return key
 
+dgh_dict = {}
+node_dict = {}
+
+def read_dataset(dataset, qi_list, sa):
+    result = dataset.dropna()
+    result = result[result.columns.intersection(qi_list + sa)]
+    return result
+
+def read_DGHs(DGH_folder: str) -> dict:
+    with os.scandir(DGH_folder) as directory:
+        node_list = []
+        for file in directory:
+            lines = open(file).read().splitlines()
+            for line in lines:
+                line = line.rstrip(' ')
+                line = line.rstrip()
+                if len(line) - len(line.lstrip()) == 0:
+                    dgh_dict[os.path.splitext(file)[0][5:]] = Node(line)
+                    node_list.insert(0, dgh_dict[os.path.splitext(file)[0][5:]])
+                else:
+                    node_name = line.lstrip()
+                    node_dict[node_name] = Node(node_name, parent=node_list[len(line) - len(line.lstrip()) - 1])
+                    node_list.insert(len(line) - len(line.lstrip()), node_dict[node_name])
+
+    return dgh_dict
+
+def cost_LM(raw_dataset_file: str, anonymized_dataset_file: str, columns, depths, current):
+    anonymized_cost = 0
+    raw_cost = 0
+
+    if depths[current] == 0:
+        anonymized_cost = len(anonymized_dataset_file) / (columns - 1)
+    else:
+        for anonymized_entry in anonymized_dataset_file:
+            anonymized_entry = node_dict[anonymized_entry]
+            anonymized_cost += ( 1 / (columns - 1) * ((len(anonymized_entry.path[depths[current]].leaves) - 1) / (len(anonymized_entry.root.leaves) - 1)))
+
+    for raw_entry in raw_dataset_file:
+        raw_entry = node_dict[raw_entry]
+        if depths[current] < raw_entry.depth:
+            raw_cost += ( 1 / (columns - 1) * ((len(raw_entry.path[depths[current] + 1].leaves) - 1) / (len(raw_entry.root.leaves) - 1)))
+
+    return (anonymized_cost, raw_cost)
+
+def anonymizer(raw_dataset):
+    k = 2
+    copy_dataset = raw_dataset.copy()
+    depths = [0] * (len(copy_dataset.columns) - 1)
+    current = len(copy_dataset)
+
+    while(current > k):
+        score_list = [0] * (len(copy_dataset.columns) - 1)
+        lm_cost_anonymized = copy_dataset.copy()
+        lm_cost_raw = copy_dataset.copy()
+        current_column = 0
+        for column in copy_dataset.iloc[:,:-1]:
+
+            current_depth = depths[current_column]
+            for i in copy_dataset[column].index:
+                current_node = node_dict[copy_dataset.at[i, column]]
+                current_node_depth = current_node.depth
+                if current_depth <= current_node_depth:
+                    lm_cost_anonymized.at[i, column] = current_node.path[current_depth].name
+                else:
+                    lm_cost_anonymized.at[i, column] = current_node.path[current_node_depth].name
+                if current_depth < current_node_depth:
+                    lm_cost_raw.at[i, column] = current_node.path[current_depth + 1].name
+                else:
+                    lm_cost_raw.at[i, column] = current_node.path[current_node_depth].name
+
+            score_list[copy_dataset.columns.get_loc(column)] = cost_LM(lm_cost_raw[column], lm_cost_anonymized[column], len(copy_dataset.columns), depths, current_column)
+            current_column += 1
+        scores = []
+        for score in score_list:
+            scores.append(score[0] - score[1])
+        max_improve_column = scores.index(max(scores))
+        column = copy_dataset.columns[max_improve_column]
+        result = lm_cost_anonymized.copy()
+        result = result.assign(**{column: lm_cost_raw[column].values})
+        depths[max_improve_column] += 1
+        eq_class_size = result.groupby(['gender','address','restaurant'], axis=0, as_index=False).size()['size']
+        minSize = min(eq_class_size)
+        current = minSize
+
+    return result
+
+'''
+db_cursor.execute(SELECT * FROM Orders)
+result2 = db_cursor.fetchall()
+fieldnames2 = [i[0] for i in db_cursor.description]
+df2 = pd.DataFrame(list(result2), columns=fieldnames2)
+raw_dataset = read_dataset(df2, ['gender','address','restaurant'], ['cost'])
+read_DGHs("DGHs")
+anonymized_dataset = anonymizer(raw_dataset)
+print(raw_dataset)
+'''
 
 app = Flask(__name__)
 CORS(app)
@@ -130,8 +229,16 @@ def get_value1():
     result2 = db_cursor.fetchall()
     fieldnames2 = [i[0] for i in db_cursor.description]
     df2 = pd.DataFrame(list(result2), columns=fieldnames2)
-    return {'content': apply_exponential_mechanism('gender',df1,0.5),'content2':private_histogram('age',df2,10,0.5)}
-
+    sql = '''SELECT * FROM Orders WHERE age = %(age)s'''
+    db_cursor.execute(sql,{'age':'21'})
+    result3 = db_cursor.fetchall()
+    fieldnames2 = [i[0] for i in db_cursor.description]
+    df3 = pd.DataFrame(list(result3), columns=fieldnames2)
+    raw_dataset = read_dataset(df3, ['gender','address','restaurant'], ['cost'])
+    read_DGHs("DGHs")
+    anonymized_dataset = anonymizer(raw_dataset)
+    print(anonymized_dataset)
+    return {'content': apply_exponential_mechanism('gender',df1,0.5),'content2':private_histogram('age',df2,10,0.5), 'content3':anonymized_dataset.to_dict()}
 
 @app.route("/value_2")
 @cross_origin()
@@ -148,7 +255,27 @@ def get_value2():
     result2 = db_cursor.fetchall()
     fieldnames2 = [i[0] for i in db_cursor.description]
     df2 = pd.DataFrame(list(result2), columns=fieldnames2)
-    return {'content': apply_exponential_mechanism('address',df,2),'content2' : private_histogram('address',df2,1,2)}
+    sql = '''SELECT * FROM Orders WHERE address = %(address)s'''
+    db_cursor.execute(sql,{'address':'Narlidere'})
+    result3 = db_cursor.fetchall()
+    fieldnames3 = [i[0] for i in db_cursor.description]
+    df3 = pd.DataFrame(list(result3), columns=fieldnames3)
+    raw_dataset = read_dataset(df3, ['gender','address','restaurant'], ['cost'])
+    read_DGHs("DGHs")
+    anonymized_dataset = anonymizer(raw_dataset)
+    print(anonymized_dataset)
+    return {'content': apply_exponential_mechanism('address',df,2),'content2' : private_histogram('address',df2,1,2),'content3':anonymized_dataset.to_dict()}
+
+
+@app.route("/users", methods=['GET'])
+@cross_origin(origin='localhost',headers=['Content- Type','Authorization'])
+def get_users():
+    sql = """ SELECT username,password,salt FROM Users """
+    db_cursor.execute(sql)
+    result = db_cursor.fetchall()
+    print(result)
+    return {'content': result}
+
 
 if __name__ == "__main__":
   app.run(host='0.0.0.0', port=8000, debug=True)

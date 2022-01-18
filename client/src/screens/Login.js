@@ -3,6 +3,8 @@ import { useState, useEffect} from 'react';
 import { Col, Row, Form,FormControl, Button } from '@themesberg/react-bootstrap';
 import Background from '../assets/login-bg.jpg';
 import { Navigate } from 'react-router-dom';
+import axios from "axios";
+import sjcl from 'sjcl';
 
 const styles = {
     header: {
@@ -36,15 +38,42 @@ export default function LoginScreen() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [path, setPath] = useState("/");
-  const [isAlert, setAlert] = useState(false);
 
-  useEffect(() => {
-    localStorage.setItem("username", username);
-  }, [username]);
+  const [username_arr, setUsernameArray] = useState([])
+  const [password_arr, setPasswordArray] = useState([])
+
+  useEffect(()=>{
+    axios.get(
+        'http://localhost:8000/users').then(response => {
+          setUsernameArray(response.data.content)
+      }).catch(error => {
+        console.log(error)
+      });
+      localStorage.setItem("username", username);
+  }, [username,password]);
 
   const login = () => {
-    setPath("/home");
-  };
+    username_arr.forEach(element=> {
+      console.log(element[0]);  
+      console.log(username);
+      if (element[0] === username)
+      {
+        const new_pswd= password + element[2];
+        const myBitArray = sjcl.hash.sha256.hash(new_pswd)
+        const myHash = sjcl.codec.hex.fromBits(myBitArray)
+        console.log(element[1]);
+        console.log(password);
+        if (element[1] === myHash)
+        { 
+          setPath("/home");
+        }
+        else
+        {
+          alert("Wrong Password");
+        }
+      }
+    });
+  }
 
     return (
     <div style={styles.header}>
